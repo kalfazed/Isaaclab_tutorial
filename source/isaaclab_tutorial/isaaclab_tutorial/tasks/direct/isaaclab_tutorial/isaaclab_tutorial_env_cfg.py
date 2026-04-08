@@ -4,12 +4,15 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from isaaclab_tutorial.robots.jetbot import JETBOT_CONFIG
+from isaaclab_tutorial.obstacles.cube import CUBE_CONFIG
 
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
+from isaaclab.sensors import RaycasterCfg, RaycasterPatternCfg
+from isaaclab.sim import SpawnableCfg, CubeCfg
 
 
 @configclass
@@ -24,9 +27,8 @@ class IsaaclabTutorialEnvCfg(DirectRLEnvCfg):
     # 动作空间的维度，比如说动作是一个二维向量，分别是jetson对应的左轮和右轮的速度，那么action_space就是2。
     action_space = 2
     # 模型看到的状态空间的维度
-    # 世界坐标系下的速度向量（vx, vy, vz），以及角速度向量（wx, wy, wz），总共6维。加上三维的指令向量（command_vx, command_vy, command_wz），总共9维。
-    #(以后如果接入感知模块，可能会看到更多的状态，比如说摄像头看到的图像，那么observation_space就会更大。)
-    observation_space = 3
+    # 3维度(dot, cross, forward_speed) + 5维度(雷达数据)，所以总共是8维度。
+    observation_space = 8
     state_space = 0 # 0表示没有额外的状态空间，模型看到的状态空间就是observation_space定义的空间。 
 
     # simulation
@@ -38,6 +40,23 @@ class IsaaclabTutorialEnvCfg(DirectRLEnvCfg):
     # 比如说prim_path="/World/envs/env_.*/Robot"，那么就会匹配所有路径以/World/envs/env_开头，后面跟任意字符，最后以/Robot结尾的机器人。
     # 这样就可以在场景中放置多个机器人，每个机器人都会被这个配置控制。
     robot_cfg: ArticulationCfg = JETBOT_CONFIG.replace(prim_path="/World/envs/env_.*/Robot")
+
+    # sensor
+    raycaster_cfg = RaycasterCfg(
+        prim_path="/World/envs/env_.*/Robot/base_link", # 绑定在机器人底盘上
+        offset=RaycasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.1)), # 稍微高一点
+        attach_to_parent=True,
+        pattern_cfg=RaycasterPatternCfg.Horizontal(
+            column_range=(-45.0, 45.0), # 扇形范围：左45度到右45度
+            num_columns=5 # 5根线
+        ),
+        max_distance=4.0, # 最远看4米
+    )
+
+    # obstacles
+    obstacle_cfg: ArticulationCfg = CUBE_CONFIG.replace(prim_path="/World/envs/env_.*/Obstacle")
+
+
     # 机器人可控制的关节名称列表。比如说jetbot有两个轮子，分别是left_wheel_joint和right_wheel_joint，那么dof_names就是["left_wheel_joint", "right_wheel_joint"]。
     # 这样模型就知道它可以控制这两个关节，输出的动作就是这两个关节的目标值。
     dof_names = ["left_wheel_joint", "right_wheel_joint"]
