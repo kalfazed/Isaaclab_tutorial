@@ -17,6 +17,29 @@ from isaaclab.utils.math import sample_uniform
 
 from .isaaclab_tutorial_env_cfg import IsaaclabTutorialEnvCfg
 
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+import isaaclab.utils.math as math_utils
+
+def define_markers() -> VisualizationMarkers:
+    """Define markers with various different shapes."""
+    marker_cfg = VisualizationMarkersCfg(
+        prim_path="/Visuals/myMarkers",
+        markers={
+                "forward": sim_utils.UsdFileCfg(
+                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                    scale=(0.25, 0.25, 0.5),
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 1.0)),
+                ),
+                "command": sim_utils.UsdFileCfg(
+                    usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                    scale=(0.25, 0.25, 0.5),
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+                ),
+        },
+    )
+    return VisualizationMarkers(cfg=marker_cfg)
+
 
 class IsaaclabTutorialEnv(DirectRLEnv):
     cfg: IsaaclabTutorialEnvCfg
@@ -26,23 +49,77 @@ class IsaaclabTutorialEnv(DirectRLEnv):
 
         self.dof_idx, _ = self.robot.find_joints(self.cfg.dof_names)
 
+    # def _setup_scene(self):
+    #     # 添加一个机器人到场景中，机器人是一个Articulation对象，包含了机器人的URDF信息和物理属性。机器人会根据cfg.robot_cfg的配置在场景中生成。
+    #     self.robot = Articulation(self.cfg.robot_cfg)
+    #     # 添加一个地面到场景中，地面是一个平面，包含了地面的物理属性。地面会根据cfg.ground_plane_cfg的配置在场景中生成。
+    #     spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
+    #     # 复制环境，生成多个并行的环境，每个环境都有一个机器人。复制环境会根据cfg.scene_cfg的配置进行，比如说复制的数量和间距。
+    #     self.scene.clone_environments(copy_from_source=False)
+    #     # 将机器人添加到场景中，机器人会根据复制的环境数量生成多个实例，每个实例都会被这个机器人对象控制。
+    #     # 机器人对象会在每个环境中找到对应的实例，并且把它们的状态和动作同步到这个对象上。
+    #     self.scene.articulations["robot"] = self.robot
+    #     # 设置光照，创建一个半球光，模拟自然光照。光照会根据cfg.light_cfg的配置进行，比如说强度和颜色。
+    #     light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
+    #     light_cfg.func("/World/Light", light_cfg)
+
     def _setup_scene(self):
-        # 添加一个机器人到场景中，机器人是一个Articulation对象，包含了机器人的URDF信息和物理属性。机器人会根据cfg.robot_cfg的配置在场景中生成。
         self.robot = Articulation(self.cfg.robot_cfg)
-        # 添加一个地面到场景中，地面是一个平面，包含了地面的物理属性。地面会根据cfg.ground_plane_cfg的配置在场景中生成。
+        # add ground plane
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
-        # 复制环境，生成多个并行的环境，每个环境都有一个机器人。复制环境会根据cfg.scene_cfg的配置进行，比如说复制的数量和间距。
+        # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
-        # 将机器人添加到场景中，机器人会根据复制的环境数量生成多个实例，每个实例都会被这个机器人对象控制。
-        # 机器人对象会在每个环境中找到对应的实例，并且把它们的状态和动作同步到这个对象上。
+        # add articulation to scene
         self.scene.articulations["robot"] = self.robot
-        # 设置光照，创建一个半球光，模拟自然光照。光照会根据cfg.light_cfg的配置进行，比如说强度和颜色。
+        # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
+
+        self.visualization_markers = define_markers()
+
+        # setting aside useful variables for later
+        self.up_dir = torch.tensor([0.0, 0.0, 1.0]).cuda()
+        self.yaws = torch.zeros((self.cfg.scene.num_envs, 1)).cuda()
+        self.commands = torch.randn((self.cfg.scene.num_envs, 3)).cuda()
+        self.commands[:,-1] = 0.0
+        self.commands = self.commands/torch.linalg.norm(self.commands, dim=1, keepdim=True)
+
+        # offsets to account for atan range and keep things on [-pi, pi]
+        ratio = self.commands[:,1]/(self.commands[:,0]+1E-8)
+        gzero = torch.where(self.commands > 0, True, False)
+        lzero = torch.where(self.commands < 0, True, False)
+        plus = lzero[:,0]*gzero[:,1]
+        minus = lzero[:,0]*lzero[:,1]
+        offsets = torch.pi*plus - torch.pi*minus
+        self.yaws = torch.atan(ratio).reshape(-1,1) + offsets.reshape(-1,1)
+
+        self.marker_locations = torch.zeros((self.cfg.scene.num_envs, 3)).cuda()
+        self.marker_offset = torch.zeros((self.cfg.scene.num_envs, 3)).cuda()
+        self.marker_offset[:,-1] = 0.5
+        self.forward_marker_orientations = torch.zeros((self.cfg.scene.num_envs, 4)).cuda()
+        self.command_marker_orientations = torch.zeros((self.cfg.scene.num_envs, 4)).cuda()
+
+    def _visualize_markers(self):
+        # 获取机器人当前的位置和姿态
+        self.marker_locations = self.robot.data.root_pos_w
+        self.forward_marker_orientations = self.robot.data.root_quat_w
+        # 将偏航角转换为四元数
+        self.command_marker_orientations = math_utils.quat_from_angle_axis(self.yaws, self.up_dir).squeeze()
+
+        # 设置标记高度偏置（放在小车上方）
+        loc = self.marker_locations + self.marker_offset
+        loc = torch.vstack((loc, loc)) # 合并位置张量
+        rots = torch.vstack((self.forward_marker_orientations, self.command_marker_orientations))
+
+        # 渲染标记
+        all_envs = torch.arange(self.cfg.scene.num_envs)
+        indices = torch.hstack((torch.zeros_like(all_envs), torch.ones_like(all_envs)))
+        self.visualization_markers.visualize(loc, rots, marker_indices=indices)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         # 将动作保存到对象的属性中，之后在_apply_action方法中使用这个动作来控制机器人。动作是一个张量，包含了每个环境的动作值。
         self.actions = actions.clone()
+        self._visualize_markers()
 
     def _apply_action(self) -> None:
         # 将动作应用到机器人上，控制机器人的关节。
@@ -67,13 +144,38 @@ class IsaaclabTutorialEnv(DirectRLEnv):
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         return False, time_out
 
+    # def _reset_idx(self, env_ids: Sequence[int] | None):
+    #     # 重置环境。这里我们将机器人的根部状态重置到默认状态，并且根据环境的原点位置进行偏移，确保每个环境中的机器人都在正确的位置。
+    #     if env_ids is None:
+    #         env_ids = self.robot._ALL_INDICES
+    #     super()._reset_idx(env_ids)
+    #
+    #     default_root_state = self.robot.data.default_root_state[env_ids]
+    #     default_root_state[:, :3] += self.scene.env_origins[env_ids]
+    #
+    #     self.robot.write_root_state_to_sim(default_root_state, env_ids)
     def _reset_idx(self, env_ids: Sequence[int] | None):
-        # 重置环境。这里我们将机器人的根部状态重置到默认状态，并且根据环境的原点位置进行偏移，确保每个环境中的机器人都在正确的位置。
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
 
+        # pick new commands for reset envs
+        self.commands[env_ids] = torch.randn((len(env_ids), 3)).cuda()
+        self.commands[env_ids,-1] = 0.0
+        self.commands[env_ids] = self.commands[env_ids]/torch.linalg.norm(self.commands[env_ids], dim=1, keepdim=True)
+
+        # recalculate the orientations for the command markers with the new commands
+        ratio = self.commands[env_ids][:,1]/(self.commands[env_ids][:,0]+1E-8)
+        gzero = torch.where(self.commands[env_ids] > 0, True, False)
+        lzero = torch.where(self.commands[env_ids]< 0, True, False)
+        plus = lzero[:,0]*gzero[:,1]
+        minus = lzero[:,0]*lzero[:,1]
+        offsets = torch.pi*plus - torch.pi*minus
+        self.yaws[env_ids] = torch.atan(ratio).reshape(-1,1) + offsets.reshape(-1,1)
+
+        # set the root state for the reset envs
         default_root_state = self.robot.data.default_root_state[env_ids]
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
 
         self.robot.write_root_state_to_sim(default_root_state, env_ids)
+        self._visualize_markers()
