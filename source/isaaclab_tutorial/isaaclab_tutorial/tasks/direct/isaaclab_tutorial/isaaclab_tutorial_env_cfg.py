@@ -11,8 +11,8 @@ from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
-from isaaclab.sensors import RaycasterCfg, RaycasterPatternCfg
-from isaaclab.sim import SpawnableCfg, CubeCfg
+from isaaclab.sensors.ray_caster import RayCasterCfg
+from isaaclab.sensors.ray_caster.patterns import LidarPatternCfg
 
 
 @configclass
@@ -42,13 +42,15 @@ class IsaaclabTutorialEnvCfg(DirectRLEnvCfg):
     robot_cfg: ArticulationCfg = JETBOT_CONFIG.replace(prim_path="/World/envs/env_.*/Robot")
 
     # sensor
-    raycaster_cfg = RaycasterCfg(
+    raycaster_cfg = RayCasterCfg(
         prim_path="/World/envs/env_.*/Robot/base_link", # 绑定在机器人底盘上
-        offset=RaycasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.1)), # 稍微高一点
-        attach_to_parent=True,
-        pattern_cfg=RaycasterPatternCfg.Horizontal(
-            column_range=(-45.0, 45.0), # 扇形范围：左45度到右45度
-            num_columns=5 # 5根线
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.1)), # 稍微高一点
+        # 使用 LidarPatternCfg 替代之前的 Horizontal 模式
+        pattern_cfg=LidarPatternCfg(
+            channels=1,                     # 只有一排射线（水平面）
+            horizontal_fov_range=(-45.0, 45.0), # 扫描范围：左45度到右45度
+            horizontal_res=22.5,            # 分辨率：90度 / (5根线-1) = 22.5度/根
+            vertical_fov_range=(0.0, 0.0),  # 垂直方向不扩散
         ),
         max_distance=4.0, # 最远看4米
     )
