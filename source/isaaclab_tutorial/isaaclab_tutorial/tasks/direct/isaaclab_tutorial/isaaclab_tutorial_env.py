@@ -24,112 +24,56 @@ class IsaaclabTutorialEnv(DirectRLEnv):
     def __init__(self, cfg: IsaaclabTutorialEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
-        self._cart_dof_idx, _ = self.robot.find_joints(self.cfg.cart_dof_name)
-        self._pole_dof_idx, _ = self.robot.find_joints(self.cfg.pole_dof_name)
-
-        self.joint_pos = self.robot.data.joint_pos
-        self.joint_vel = self.robot.data.joint_vel
+        self.dof_idx, _ = self.robot.find_joints(self.cfg.dof_name)
 
     def _setup_scene(self):
+        # 添加一个机器人到场景中，机器人是一个Articulation对象，包含了机器人的URDF信息和物理属性。机器人会根据cfg.robot_cfg的配置在场景中生成。
         self.robot = Articulation(self.cfg.robot_cfg)
-        # add ground plane
+        # 添加一个地面到场景中，地面是一个平面，包含了地面的物理属性。地面会根据cfg.ground_plane_cfg的配置在场景中生成。
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
-        # clone and replicate
+        # 复制环境，生成多个并行的环境，每个环境都有一个机器人。复制环境会根据cfg.scene_cfg的配置进行，比如说复制的数量和间距。
         self.scene.clone_environments(copy_from_source=False)
-        # we need to explicitly filter collisions for CPU simulation
-        if self.device == "cpu":
-            self.scene.filter_collisions(global_prim_paths=[])
-        # add articulation to scene
+        # 将机器人添加到场景中，机器人会根据复制的环境数量生成多个实例，每个实例都会被这个机器人对象控制。
+        # 机器人对象会在每个环境中找到对应的实例，并且把它们的状态和动作同步到这个对象上。
         self.scene.articulations["robot"] = self.robot
-        # add lights
+        # 设置光照，创建一个半球光，模拟自然光照。光照会根据cfg.light_cfg的配置进行，比如说强度和颜色。
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        # 将动作保存到对象的属性中，之后在_apply_action方法中使用这个动作来控制机器人。动作是一个张量，包含了每个环境的动作值。
         self.actions = actions.clone()
 
     def _apply_action(self) -> None:
-        self.robot.set_joint_effort_target(self.actions * self.cfg.action_scale, joint_ids=self._cart_dof_idx)
+        # 将动作应用到机器人上，控制机器人的关节。
+        # 这里使用set_joint_velocity_target方法，将动作作为关节的速度目标值，机器人会根据这个目标值来调整关节的速度。
+        # joint_ids参数指定了要控制的关节的索引，这些索引是在初始化时根据cfg.dof_names找到的。
+        self.robot.set_joint_velocity_target(self.actions, joint_ids=self.dof_idx)
 
     def _get_observations(self) -> dict:
-        obs = torch.cat(
-            (
-                self.joint_pos[:, self._pole_dof_idx[0]].unsqueeze(dim=1),
-                self.joint_vel[:, self._pole_dof_idx[0]].unsqueeze(dim=1),
-                self.joint_pos[:, self._cart_dof_idx[0]].unsqueeze(dim=1),
-                self.joint_vel[:, self._cart_dof_idx[0]].unsqueeze(dim=1),
-            ),
-            dim=-1,
-        )
-        observations = {"policy": obs}
+        # 获取机器人的状态，作为模型看到的状态空间。这里我们获取了机器人的根部线速度，作为观察值的一部分。
+        self.velocity = self.robot.data.root_com_line_vel_b
+        observations = {"policy": self.velocity}
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        total_reward = compute_rewards(
-            self.cfg.rew_scale_alive,
-            self.cfg.rew_scale_terminated,
-            self.cfg.rew_scale_pole_pos,
-            self.cfg.rew_scale_cart_vel,
-            self.cfg.rew_scale_pole_vel,
-            self.joint_pos[:, self._pole_dof_idx[0]],
-            self.joint_vel[:, self._pole_dof_idx[0]],
-            self.joint_pos[:, self._cart_dof_idx[0]],
-            self.joint_vel[:, self._cart_dof_idx[0]],
-            self.reset_terminated,
-        )
+        # 计算奖励。这里我们简单地使用机器人的速度的范数作为奖励，鼓励机器人移动得更快。
+        # 你可以根据任务的需求设计更复杂的奖励函数，比如说根据机器人的位置、姿态或者与环境的交互来计算奖励。
+        total_reward = torch.linalg.norm(self.velocity, dim=-1, keepdim=True)
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        self.joint_pos = self.robot.data.joint_pos
-        self.joint_vel = self.robot.data.joint_vel
-
+        # 计算done信号，表示一个episode是否结束。这里我们简单地使用一个时间限制，当episode的长度超过最大值时，就结束这个episode。
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        out_of_bounds = torch.any(torch.abs(self.joint_pos[:, self._cart_dof_idx]) > self.cfg.max_cart_pos, dim=1)
-        out_of_bounds = out_of_bounds | torch.any(torch.abs(self.joint_pos[:, self._pole_dof_idx]) > math.pi / 2, dim=1)
-        return out_of_bounds, time_out
+        return False, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
+        # 重置环境。这里我们将机器人的根部状态重置到默认状态，并且根据环境的原点位置进行偏移，确保每个环境中的机器人都在正确的位置。
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
 
-        joint_pos = self.robot.data.default_joint_pos[env_ids]
-        joint_pos[:, self._pole_dof_idx] += sample_uniform(
-            self.cfg.initial_pole_angle_range[0] * math.pi,
-            self.cfg.initial_pole_angle_range[1] * math.pi,
-            joint_pos[:, self._pole_dof_idx].shape,
-            joint_pos.device,
-        )
-        joint_vel = self.robot.data.default_joint_vel[env_ids]
-
         default_root_state = self.robot.data.default_root_state[env_ids]
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
 
-        self.joint_pos[env_ids] = joint_pos
-        self.joint_vel[env_ids] = joint_vel
-
-        self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
-        self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
-        self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
-
-
-@torch.jit.script
-def compute_rewards(
-    rew_scale_alive: float,
-    rew_scale_terminated: float,
-    rew_scale_pole_pos: float,
-    rew_scale_cart_vel: float,
-    rew_scale_pole_vel: float,
-    pole_pos: torch.Tensor,
-    pole_vel: torch.Tensor,
-    cart_pos: torch.Tensor,
-    cart_vel: torch.Tensor,
-    reset_terminated: torch.Tensor,
-):
-    rew_alive = rew_scale_alive * (1.0 - reset_terminated.float())
-    rew_termination = rew_scale_terminated * reset_terminated.float()
-    rew_pole_pos = rew_scale_pole_pos * torch.sum(torch.square(pole_pos).unsqueeze(dim=1), dim=-1)
-    rew_cart_vel = rew_scale_cart_vel * torch.sum(torch.abs(cart_vel).unsqueeze(dim=1), dim=-1)
-    rew_pole_vel = rew_scale_pole_vel * torch.sum(torch.abs(pole_vel).unsqueeze(dim=1), dim=-1)
-    total_reward = rew_alive + rew_termination + rew_pole_pos + rew_cart_vel + rew_pole_vel
-    return total_reward
+        self.robot.write_root_state_to_sim(default_root_state, env_ids)
