@@ -117,14 +117,22 @@ class IsaaclabTutorialEnv(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         # 获取机器人的状态，作为模型看到的状态空间。这里我们获取了机器人的根部线速度，作为观察值的一部分。
-        self.velocity = self.robot.data.root_com_lin_vel_b
-        observations = {"policy": self.velocity}
+        self.velocity = self.robot.data.root_com_lin_vel_w # 六维度: 线速度 + 角速度
+        # 计算机器人在世界坐标系下前进的方向
+        self.forwards = math_utils.quat_apply(self.robot.data.root_link_quat_w, self.robot.data.FORWARD_VEC_B)
+
+        obs = torch.hstack((self.velocity, self.commands))
+        observations = {"policy": obs}
+
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        # 计算奖励。这里我们简单地使用机器人的速度的范数作为奖励，鼓励机器人移动得更快。
-        # 你可以根据任务的需求设计更复杂的奖励函数，比如说根据机器人的位置、姿态或者与环境的交互来计算奖励。
-        total_reward = torch.linalg.norm(self.velocity, dim=-1, keepdim=True)
+        # 计算奖励。这里我们设计了一个奖励函数，鼓励机器人在前进的同时，朝着指令的方向移动。
+        # 机器人在自身坐标系下 X 轴的速度
+        forward_reward = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
+        # 前进向量与指令向量的点积（对齐度）
+        alignment_reward = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
+        total_reward = forward_reward + alignment_reward
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
