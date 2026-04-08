@@ -147,6 +147,12 @@ class IsaaclabTutorialEnv(DirectRLEnv):
 
         # 逻辑"与"操作，当机器人既在前进又在对齐时，才能得到奖励。这样模型就必须同时满足这两个条件，才能获得奖励。
         total_reward = forward_reward * alignment_reward
+
+        # 逻辑"与"操作有一个漏洞。就是倒车也能得到奖励
+        # 因为倒车时forward_reward是负的，alignment_reward也是负的，它们的乘积是正的。
+        # 为了修复这个问题，我们可以使用指数函数来增强奖励的非线性
+        # 这样当alignment_reward是负的时候，exp(alignment_reward)会变得非常小，几乎抵消掉forward_reward的负值，从而避免倒车得到奖励。
+        total_reward = forward_reward * torch.exp(alignment_reward)
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
