@@ -46,41 +46,29 @@ class IsaaclabTutorialEnv(DirectRLEnv):
 
     def __init__(self, cfg: IsaaclabTutorialEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
-
         self.dof_idx, _ = self.robot.find_joints(self.cfg.dof_names)
 
-    # def _setup_scene(self):
-    #     # 添加一个机器人到场景中，机器人是一个Articulation对象，包含了机器人的URDF信息和物理属性。机器人会根据cfg.robot_cfg的配置在场景中生成。
-    #     self.robot = Articulation(self.cfg.robot_cfg)
-    #     # 添加一个地面到场景中，地面是一个平面，包含了地面的物理属性。地面会根据cfg.ground_plane_cfg的配置在场景中生成。
-    #     spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
-    #     # 复制环境，生成多个并行的环境，每个环境都有一个机器人。复制环境会根据cfg.scene_cfg的配置进行，比如说复制的数量和间距。
-    #     self.scene.clone_environments(copy_from_source=False)
-    #     # 将机器人添加到场景中，机器人会根据复制的环境数量生成多个实例，每个实例都会被这个机器人对象控制。
-    #     # 机器人对象会在每个环境中找到对应的实例，并且把它们的状态和动作同步到这个对象上。
-    #     self.scene.articulations["robot"] = self.robot
-    #     # 设置光照，创建一个半球光，模拟自然光照。光照会根据cfg.light_cfg的配置进行，比如说强度和颜色。
-    #     light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
-    #     light_cfg.func("/World/Light", light_cfg)
-
     def _setup_scene(self):
+        # 添加一个机器人到场景中，机器人是一个Articulation对象，包含了机器人的URDF信息和物理属性。机器人会根据cfg.robot_cfg的配置在场景中生成。
         self.robot = Articulation(self.cfg.robot_cfg)
-        # add ground plane
+        # 添加一个地面到场景中，地面是一个平面，包含了地面的物理属性。地面会根据cfg.ground_plane_cfg的配置在场景中生成。
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
-        # clone and replicate
+        # 复制环境，生成多个并行的环境，每个环境都有一个机器人。复制环境会根据cfg.scene_cfg的配置进行，比如说复制的数量和间距。
         self.scene.clone_environments(copy_from_source=False)
-        # add articulation to scene
+        # 将机器人添加到场景中，机器人会根据复制的环境数量生成多个实例，每个实例都会被这个机器人对象控制。
+        # 机器人对象会在每个环境中找到对应的实例，并且把它们的状态和动作同步到这个对象上。
         self.scene.articulations["robot"] = self.robot
-        # add lights
+        # 设置光照，创建一个半球光，模拟自然光照。光照会根据cfg.light_cfg的配置进行，比如说强度和颜色。
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
         self.visualization_markers = define_markers()
 
-        # setting aside useful variables for later
+        # 这里我们预先计算了一些变量，这些变量在后续的步骤中会用到。比如说up_dir表示上方向的单位向量，yaws表示每个环境中命令的偏航角，commands表示每个环境中的目标方向命令。
         self.up_dir = torch.tensor([0.0, 0.0, 1.0]).cuda()
         self.yaws = torch.zeros((self.cfg.scene.num_envs, 1)).cuda()
         self.commands = torch.randn((self.cfg.scene.num_envs, 3)).cuda()
+        # 将命令的z分量设置为0，并且将命令向量归一化，确保它们只表示水平平面上的方向。
         self.commands[:,-1] = 0.0
         self.commands = self.commands/torch.linalg.norm(self.commands, dim=1, keepdim=True)
 
@@ -144,17 +132,8 @@ class IsaaclabTutorialEnv(DirectRLEnv):
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         return False, time_out
 
-    # def _reset_idx(self, env_ids: Sequence[int] | None):
-    #     # 重置环境。这里我们将机器人的根部状态重置到默认状态，并且根据环境的原点位置进行偏移，确保每个环境中的机器人都在正确的位置。
-    #     if env_ids is None:
-    #         env_ids = self.robot._ALL_INDICES
-    #     super()._reset_idx(env_ids)
-    #
-    #     default_root_state = self.robot.data.default_root_state[env_ids]
-    #     default_root_state[:, :3] += self.scene.env_origins[env_ids]
-    #
-    #     self.robot.write_root_state_to_sim(default_root_state, env_ids)
     def _reset_idx(self, env_ids: Sequence[int] | None):
+        # 重置环境。这里我们将机器人的根部状态重置到默认状态，并且根据环境的原点位置进行偏移，确保每个环境中的机器人都在正确的位置。
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
