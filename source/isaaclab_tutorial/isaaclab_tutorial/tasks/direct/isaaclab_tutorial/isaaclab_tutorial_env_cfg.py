@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from isaaclab_assets.robots.cartpole import CARTPOLE_CFG
+from isaaclab_tutorial.robots.jetbot import JETBOT_CFG
 
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
@@ -15,12 +15,18 @@ from isaaclab.utils import configclass
 @configclass
 class IsaaclabTutorialEnvCfg(DirectRLEnvCfg):
     # env
-    decimation = 2
-    episode_length_s = 5.0
+    # 控制频率，控制器每隔多少个sim step执行一次。比如说decimation=2，sim step是120Hz，那么控制频率就是60Hz
+    decimation = 2 
+    # 每个episode的长度，单位是秒。比如说episode_length_s=5.0，sim step是120Hz，那么每个episode就是600个sim step。之后reset环境，重新开始一个新的episode。
+    episode_length_s = 5.0 
+
     # - spaces definition
-    action_space = 1
-    observation_space = 4
-    state_space = 0
+    # 动作空间的维度，比如说动作是一个二维向量，分别是jetson对应的左轮和右轮的速度，那么action_space就是2。
+    action_space = 2
+    # 模型看到的状态空间的维度，比如说模型看到的是jetson的位置、速度和加速度，那么observation_space就是3。
+    #(以后如果接入感知模块，可能会看到更多的状态，比如说摄像头看到的图像，那么observation_space就会更大。)
+    observation_space = 3 
+    state_space = 0 # 0表示没有额外的状态空间，模型看到的状态空间就是observation_space定义的空间。 
 
     # simulation
     sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
