@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from isaaclab_tutorial.robots.jetbot import JETBOT_CONFIG
-from isaaclab_tutorial.obstacles.cube import CUBE_CONFIG
+import isaaclab.sim as sim_utils
+from isaaclab.assets import RigidObjectCfg
 
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
@@ -43,7 +44,10 @@ class IsaaclabTutorialEnvCfg(DirectRLEnvCfg):
 
     # sensor
     raycaster_cfg = RayCasterCfg(
-        prim_path="/World/envs/env_.*/Robot/base_link", # 绑定在机器人底盘上
+        # Jetbot USD 根下通常没有 base_link；与 robot_cfg 一致，挂在 articulation 根上即可。
+        prim_path="/World/envs/env_.*/Robot",
+        # RayCaster 当前仅支持单个 mesh_prim_path；射线只与该网格求交。障碍物需多网格时要等框架支持或自行合并网格。
+        mesh_prim_paths=["/World/ground"],
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.1)), # 稍微高一点
         # 使用 LidarPatternCfg 替代之前的 Horizontal 模式
         pattern_cfg=LidarPatternCfg(
@@ -56,7 +60,18 @@ class IsaaclabTutorialEnvCfg(DirectRLEnvCfg):
     )
 
     # obstacles
-    obstacle_cfg: ArticulationCfg = CUBE_CONFIG.replace(prim_path="/World/envs/env_.*/Obstacle")
+    # UsdFileCfg 对 rigid_props 调用的是 modify_rigid_body_properties：根 prim 上若没有现成的
+    # RigidBodyAPI 则不会添加，Nucleus 的 cube.usd 常导致 RigidObject 初始化失败。CuboidCfg 使用
+    # define_rigid_body_properties，会在根 Xform 上正确应用 RigidBodyAPI。
+    obstacle_cfg = RigidObjectCfg(
+        prim_path="/World/envs/env_.*/Obstacle",
+        spawn=sim_utils.CuboidCfg(
+            size=(1.5, 1.5, 1.5),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        ),
+    )
+
 
 
     # 机器人可控制的关节名称列表。比如说jetbot有两个轮子，分别是left_wheel_joint和right_wheel_joint，那么dof_names就是["left_wheel_joint", "right_wheel_joint"]。
