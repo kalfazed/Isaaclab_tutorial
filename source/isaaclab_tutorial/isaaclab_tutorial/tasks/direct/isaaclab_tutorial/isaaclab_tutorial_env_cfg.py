@@ -26,7 +26,7 @@ class IsaaclabTutorialEnvCfg(DirectRLEnvCfg):
     # 模型看到的状态空间的维度
     # 世界坐标系下的速度向量（vx, vy, vz），以及角速度向量（wx, wy, wz），总共6维。加上三维的指令向量（command_vx, command_vy, command_wz），总共9维。
     #(以后如果接入感知模块，可能会看到更多的状态，比如说摄像头看到的图像，那么observation_space就会更大。)
-    observation_space = 9
+    observation_space = 3
     state_space = 0 # 0表示没有额外的状态空间，模型看到的状态空间就是observation_space定义的空间。 
 
     # simulation

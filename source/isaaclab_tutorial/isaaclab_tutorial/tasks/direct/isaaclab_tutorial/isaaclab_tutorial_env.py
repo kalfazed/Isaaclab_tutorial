@@ -121,7 +121,16 @@ class IsaaclabTutorialEnv(DirectRLEnv):
         # 计算机器人在世界坐标系下前进的方向
         self.forwards = math_utils.quat_apply(self.robot.data.root_link_quat_w, self.robot.data.FORWARD_VEC_B)
 
-        obs = torch.hstack((self.velocity, self.commands))
+        # 这里我们设计了一个简单的观察值
+        # 只包含了前进方向与指令方向的点积（表示对齐程度），以及它们的叉积（表示偏离方向），
+        # 还有机器人在自身坐标系下X轴的速度（表示前进速度）。
+        # 这样模型就可以根据这个观察值来判断自己是否在朝着指令的方向前进，以及前进的速度如何。
+        # 这个相比于直接把速度和指令作为观察值，更加抽象和简洁，模型需要自己学会从这些信息中推断出正确的行为。
+        dot = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
+        cross = torch.cross(self.forwards, self.commands, dim=-1)[:,-1].reshape(-1,1)
+        forward_speed = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
+        obs = torch.hstack((dot, cross, forward_speed))
+
         observations = {"policy": obs}
 
         return observations
