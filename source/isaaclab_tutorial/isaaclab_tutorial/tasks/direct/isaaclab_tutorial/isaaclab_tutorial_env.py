@@ -117,7 +117,7 @@ class IsaaclabTutorialEnv(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         # 获取机器人的状态，作为模型看到的状态空间。这里我们获取了机器人的根部线速度，作为观察值的一部分。
-        self.velocity = self.robot.data.root_com_lin_vel_w # 六维度: 线速度 + 角速度
+        self.velocity = self.robot.data.root_com_vel_w # 六维度: 线速度 + 角速度
         # 计算机器人在世界坐标系下前进的方向
         self.forwards = math_utils.quat_apply(self.robot.data.root_link_quat_w, self.robot.data.FORWARD_VEC_B)
 
