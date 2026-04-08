@@ -141,7 +141,12 @@ class IsaaclabTutorialEnv(DirectRLEnv):
         forward_reward = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
         # 前进向量与指令向量的点积（对齐度）
         alignment_reward = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
-        total_reward = forward_reward + alignment_reward
+        # 逻辑“或”操作，当机器人要么在前进，要么在对齐时，都能得到奖励。这样模型就可以学会两者兼顾，既要前进又要对齐。
+        # 这样机器人有的时候可能会牺牲一些前进速度来更好地对齐指令方向，或者牺牲一些对齐度来获得更高的前进速度。总之，这个奖励函数鼓励机器人在这两者之间找到一个平衡点。
+        # total_reward = forward_reward + alignment_reward
+
+        # 逻辑"与"操作，当机器人既在前进又在对齐时，才能得到奖励。这样模型就必须同时满足这两个条件，才能获得奖励。
+        total_reward = forward_reward * alignment_reward
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
