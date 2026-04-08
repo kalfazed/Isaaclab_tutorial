@@ -24,7 +24,7 @@ class IsaaclabTutorialEnv(DirectRLEnv):
     def __init__(self, cfg: IsaaclabTutorialEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
-        self.dof_idx, _ = self.robot.find_joints(self.cfg.dof_name)
+        self.dof_idx, _ = self.robot.find_joints(self.cfg.dof_names)
 
     def _setup_scene(self):
         # 添加一个机器人到场景中，机器人是一个Articulation对象，包含了机器人的URDF信息和物理属性。机器人会根据cfg.robot_cfg的配置在场景中生成。
@@ -52,7 +52,7 @@ class IsaaclabTutorialEnv(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         # 获取机器人的状态，作为模型看到的状态空间。这里我们获取了机器人的根部线速度，作为观察值的一部分。
-        self.velocity = self.robot.data.root_com_line_vel_b
+        self.velocity = self.robot.data.root_com_lin_vel_b
         observations = {"policy": self.velocity}
         return observations
 
